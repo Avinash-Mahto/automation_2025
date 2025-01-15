@@ -1,0 +1,93 @@
+import boto3
+import json
+import logging
+import time
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+sns_client = boto3.client('sns')
+ec2_client = boto3.client('ec2')
+
+SNS_TOPIC_ARN = 'arn'
+
+def lambda_handler(event, context):
+    try:
+        logger.info(f"Received event: {json.dumps(event, indent=2)}")
+
+        # Extract VPC ID from the event if it's a CreateVpc event
+        vpc_id = None
+        if event['detail']['eventName'] == 'CreateVpc':
+            vpc_id = event['detail']['responseElements']['vpc']['vpcId']
+            logger.info(f"New VPC Created: {vpc_id}")
+
+        # Extract Security Group ID for other events
+        security_group_id = None
+        if 'requestParameters' in event['detail']:
+            if 'groupId' in event['detail']['requestParameters']:
+                security_group_id = event['detail']['requestParameters']['groupId']
+            elif 'groupIds' in event['detail']['requestParameters']:
+                security_group_id = event['detail']['requestParameters']['groupIds'][0]
+
+        if not security_group_id and vpc_id:
+            # Retry mechanism to find the default security group
+            for attempt in range(5):  # Retry up to 5 times
+                response = ec2_client.describe_security_groups(
+                    Filters=[
+                        {'Name': 'vpc-id', 'Values': [vpc_id]},
+                        {'Name': 'group-name', 'Values': ['default']}
+                    ]
+                )
+                if response['SecurityGroups']:
+                    security_group = response['SecurityGroups'][0]
+                    security_group_id = security_group['GroupId']
+                    logger.info(f"Default Security Group found: {security_group_id}")
+                    break
+                logger.warning(f"Attempt {attempt + 1}: Default security group not found. Retrying...")
+                time.sleep(2)  # Wait for 2 seconds before retrying
+
+        if not security_group_id:
+            logger.warning("No security group ID found in the event. Exiting.")
+            return
+
+        # Describe the security group to get details
+        response = ec2_client.describe_security_groups(GroupIds=[security_group_id])
+        security_group = response['SecurityGroups'][0]
+        security_group_name = security_group['GroupName']
+        vpc_id = security_group['VpcId']
+
+        logger.info(f"Security Group ID: {security_group_id}, Name: {security_group_name}, VPC ID: {vpc_id}")
+
+        # Ensure the security group is the default one
+        if security_group_name != 'default':
+            logger.info(f"Security group {security_group_id} is not the default group. No action taken.")
+            return
+
+        # Revoke inbound rules if they exist
+        if security_group['IpPermissions']:
+            ec2_client.revoke_security_group_ingress(
+                GroupId=security_group_id,
+                IpPermissions=security_group['IpPermissions']
+            )
+            logger.info(f"Revoked inbound rules from default security group {security_group_id}")
+
+        # Revoke outbound rules if they exist
+        if security_group['IpPermissionsEgress']:
+            ec2_client.revoke_security_group_egress(
+                GroupId=security_group_id,
+                IpPermissions=security_group['IpPermissionsEgress']
+            )
+            logger.info(f"Revoked outbound rules from default security group {security_group_id}")
+
+        # Send an SNS notification
+        sns_message = f"Deleted inbound/outbound rules for default security group {security_group_id} in VPC {vpc_id}"
+        sns_client.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Subject='Default Security Group Rules Deleted',
+            Message=sns_message
+        )
+        logger.info(f"SNS notification sent: {sns_message}")
+
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        raise
