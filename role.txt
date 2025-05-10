@@ -1,0 +1,47 @@
+## LambdaListAccountPolicy -  Create this policy in Central Account and atatch it to Lambda Role
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Effect": "Allow",
+			"Action": "organizations:ListAccounts",
+			"Resource": "*"
+		}
+	]
+}
+
+
+
+# Create this Policy and atatched to Role in Target Account
+
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Effect": "Allow",
+			"Action": [
+				"ec2:DescribeVpcs",
+				"ec2:DescribeSecurityGroups",
+				"ec2:RevokeSecurityGroupIngress",
+				"ec2:RevokeSecurityGroupEgress"
+			],
+			"Resource": "*"
+		}
+	]
+}
+
+## Keep this Trust Relationship of Target account Role
+
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::CENTRAL_ACCOUNT_ID:root"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {}
+        }
+    ]
+}
