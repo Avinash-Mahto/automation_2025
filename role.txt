@@ -1,4 +1,4 @@
-## LambdaListAccountPolicy -  Create this policy in Central Account and atatch it to Lambda Role
+## LambdaListAccountPolicy -  Create this policy in Central Account and attach it to Lambda Role
 {
 	"Version": "2012-10-17",
 	"Statement": [
